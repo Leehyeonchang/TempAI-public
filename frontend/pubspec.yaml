@@ -1,0 +1,38 @@
+name: frontend
+description: "AI 예측 및 이상 감지 Flutter 앱"
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"  # 안정적인 범위로 수정
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ✅ 네트워크 요청
+  http: ^1.2.0  
+
+  # ✅ 자동 로그인용
+  shared_preferences: ^2.2.2  
+
+  # ✅ 사이드 메뉴
+  easy_sidemenu: ^0.6.0  
+
+  # ✅ 그래프 시각화
+  fl_chart: ^0.68.0  
+
+  # ✅ 아이콘
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo/CH_2.png

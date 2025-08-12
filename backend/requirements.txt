@@ -1,0 +1,10 @@
+fastapi==0.110.0
+uvicorn==0.27.0
+python-multipart
+pandas
+numpy
+scikit-learn
+matplotlib
+pyodbc
+joblib
+tensorflow==2.15.0
