@@ -1,0 +1,36 @@
+name: Make GPT Bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install requirements
+        run: pip install requests pyyaml
+
+      - name: Run GPT Repo Bundler
+        run: |
+          python gpt_repo_bundler.py \
+            --repo https://github.com/Leehyeonchang/TempAI-public \
+            --out bundle_TempAI.md \
+            --include backend frontend .github README.md \
+            --max-bytes 120000 \
+            --fresh
+
+      - name: Upload bundle file
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle_TempAI
+          path: bundle_TempAI.md
