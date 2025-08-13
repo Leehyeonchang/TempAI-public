@@ -1,9 +1,9 @@
 name: Make GPT Bundle
 
 on:
-  workflow_dispatch:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   bundle:
@@ -15,22 +15,124 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install requirements
-        run: pip install requests pyyaml
-
-      - name: Run GPT Repo Bundler
+      # 1) 번들러 스크립트를 레포 내부에 생성
+      - name: Create bundler script
         run: |
-          python gpt_repo_bundler.py \
-            --repo https://github.com/Leehyeonchang/TempAI-public \
-            --out bundle_TempAI.md \
-            --include backend frontend .github README.md \
-            --max-bytes 120000 \
-            --fresh
+          mkdir -p .github/tools
+          cat > .github/tools/gpt_repo_bundler.py << 'PY'
+          #!/usr/bin/env python3
+          import argparse, os
+          from pathlib import Path
+          from datetime import datetime
 
-      - name: Upload bundle file
-        uses: actions/upload-artifact@v4
-        with:
-          name: bundle_TempAI
-          path: bundle_TempAI.md
+          DEFAULT_INCLUDE = ["backend", "frontend", ".github", "README.md"]
+          DEFAULT_EXCLUDE = [
+              ".git",".github/workflows","venv",".venv","node_modules","build",".dart_tool","__pycache__",
+              "*.env","*.pkl","*.pt","*.onnx","*.h5","*.bin","*.dll","*.so",
+              "*.zip","*.7z","*.rar","*.tar","*.gz","*.xz","*.png","*.jpg","*.jpeg","*.gif","*.webp","*.pdf"
+          ]
+          TEXT_EXTS = {".py",".dart",".yaml",".yml",".json",".md",".txt",".js",".ts",".html",".css",".toml",".ini",".cfg",".sql"}
+
+          def matches_any(p, pats):
+              from pathlib import Path as _P
+              for pat in pats:
+                  if "*" in pat or "?" in pat:
+                      if _P(p).match(pat): return True
+                  else:
+                      if pat in p.split(os.sep): return True
+              return False
+
+          def short_tree(root, include, exclude):
+              lines=[]
+              for dp, dns, fns in os.walk(root):
+                  rel = Path(dp).relative_to(root) if Path(dp)!=root else Path(".")
+                  dns[:] = [d for d in dns if not matches_any(str((rel/ d)), exclude)]
+                  rels = str(rel).replace("\\","/")
+                  if include and rels!="." and not any(rels.startswith(i.strip("/")) for i in include): 
+                      continue
+                  lines.append(str(rel))
+                  for f in sorted(fns):
+                      p=str(rel / f)
+                      if matches_any(p, exclude): continue
+                      lines.append("  "+p)
+              return "\n".join(lines)
+
+          def is_text(path:Path):
+              if path.suffix.lower() in TEXT_EXTS: return True
+              try:
+                  b=open(path,"rb").read(4096)
+                  if b"\x00" in b: return False
+                  b.decode("utf-8")
+                  return True
+              except: return False
+
+          def main():
+              import os
+              import argparse
+              ap=argparse.ArgumentParser()
+              ap.add_argument("--out", default="gpt_bundle.md")
+              ap.add_argument("--include", nargs="*", default=DEFAULT_INCLUDE)
+              ap.add_argument("--exclude", nargs="*", default=DEFAULT_EXCLUDE)
+              ap.add_argument("--max-bytes", type=int, default=200_000)
+              ap.add_argument("--max-files", type=int, default=400)
+              args=ap.parse_args()
+
+              root=Path(".").resolve()
+              out=Path(args.out).resolve()
+              with open(out,"w",encoding="utf-8") as fp:
+                  fp.write(f"# GPT Bundle — TempAI-public\n")
+                  fp.write(f"- Generated: {datetime.utcnow().isoformat()}Z\n\n")
+                  fp.write("## Directory tree (filtered)\n\n```\n")
+                  fp.write(short_tree(root,[p.replace('\\','/').strip('/') for p in args.include],args.exclude))
+                  fp.write("\n```\n\n## Files (truncated)\n")
+
+                  count=0
+                  for dp,dns,fns in os.walk(root):
+                      rel=Path(dp).relative_to(root)
+                      dns[:]=[d for d in dns if not matches_any(str((rel/d)).replace("\\","/"), args.exclude)]
+                      rels=str(rel).replace("\\","/")
+                      if args.include and rels!="." and not any(rels.startswith(i.strip('/')) for i in args.include):
+                          continue
+                      for f in sorted(fns):
+                          relf=Path(rel,f); relsfile=str(relf).replace("\\","/")
+                          p=Path(dp)/f
+                          if matches_any(relsfile,args.exclude): continue
+                          if not is_text(p): continue
+                          size=p.stat().st_size
+                          if count>=args.max_files:
+                              fp.write("\n> **File limit reached.**\n"); break
+                          content=open(p,"r",encoding="utf-8",errors="replace").read(args.max_bytes+1)
+                          trunc = len(content)>args.max_bytes
+                          if trunc: content=content[:args.max_bytes]
+                          fp.write(f"\n### `{relsfile}`\n`size: {size} bytes`")
+                          if trunc: fp.write(f" — *(truncated to {args.max_bytes} bytes)*")
+                          fp.write("\n\n```{}\n".format(p.suffix.lstrip('.') or ''))
+                          fp.write(content); fp.write("\n```\n")
+                          count+=1
+                  fp.write(f"\n---\n_Total embedded files: {count}_\n")
+
+          if __name__=="__main__": main()
+          PY
+
+      # 2) 번들 생성
+      - name: Run bundler
+        run: |
+          python .github/tools/gpt_repo_bundler.py \
+            --out gpt_bundle.md \
+            --include backend frontend .github README.md \
+            --max-bytes 200000
+
+      # 3) 변경 시 커밋/푸시 (레포 루트에 gpt_bundle.md가 저장됨)
+      - name: Commit bundle if changed
+        run: |
+          if git diff --quiet -- gpt_bundle.md; then
+            echo "No changes in bundle."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add gpt_bundle.md
+            git commit -m "docs: update gpt_bundle.md"
+            git push
+          fi
